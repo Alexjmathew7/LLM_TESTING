@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Load Test Running - {{ run_id }}</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #161d2e;
+    --border: #263047;
+    --text: #e6ebf5;
+    --muted: #93a0b8;
+    --accent: #5b8cff;
+    --accent2: #3ddc97;
+    --danger: #ff6b7a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 32px 20px 60px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.88rem; margin-bottom: 22px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px;
+    margin-bottom: 20px;
+  }
+  .progress-outer {
+    background: #0d1220;
+    border-radius: 8px;
+    height: 22px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .progress-inner {
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    height: 100%;
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+  .stat-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-top: 14px;
+    font-size: 0.86rem;
+  }
+  .stat { color: var(--muted); }
+  .stat b { color: var(--text); font-size: 1.05rem; display: block; }
+  .status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .status-running { background: #1e3a24; color: var(--accent2); }
+  .status-done { background: #1c2b47; color: var(--accent); }
+  .status-error { background: #3a1a22; color: var(--danger); }
+  #log {
+    background: #0a0e18;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    height: 220px;
+    overflow-y: auto;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    color: #9fd6a8;
+    white-space: pre-wrap;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+  th, td {
+    padding: 7px 8px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  .table-scroll { max-height: 380px; overflow-y: auto; }
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+  a.btn, button.btn {
+    background: var(--accent);
+    color: white;
+    text-decoration: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 0.86rem;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+  }
+  button.btn.stop { background: var(--danger); }
+  a.btn.secondary { background: #232d45; }
+  .charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .charts-grid img {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: white;
+  }
+  h2 { font-size: 1.05rem; margin: 0 0 14px 0; }
+  .back { color: var(--muted); text-decoration: none; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="{{ url_for('index') }}">&larr; New run</a>
+  <h1>Load Test <span id="badge" class="status-badge status-running">running</span></h1>
+  <div class="sub">Run <code>{{ run_id }}</code> &middot; {{ cfg.model }} &middot; {{ cfg.base_url }}</div>
+
+  <div class="card">
+    <div class="progress-outer"><div class="progress-inner" id="progress-bar"></div></div>
+    <div class="stat-row">
+      <div class="stat"><b id="stat-round">0 / 0</b>rounds</div>
+      <div class="stat"><b id="stat-users">{{ cfg.user_levels }}</b>user levels</div>
+      <div class="stat"><b id="stat-elapsed">0s</b>elapsed</div>
+      <div class="stat"><b id="stat-avg-tps">-</b>latest output TPS</div>
+      <div class="stat"><b id="stat-avg-tps-user">-</b>latest TPS / user</div>
+    </div>
+    <div class="btns" style="margin-top:18px;">
+      <button class="btn stop" id="stop-btn" onclick="stopRun()">Stop after current round</button>
+      <a class="btn secondary" href="{{ url_for('download_json', run_id=run_id) }}" id="json-link" style="display:none;">Download JSON</a>
+      <a class="btn secondary" href="{{ url_for('download_pdf', run_id=run_id) }}" id="pdf-link" style="display:none;">Download PDF report</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Live log</h2>
+    <div id="log"></div>
+  </div>
+
+  <div class="card">
+    <h2>Round results</h2>
+    <div class="table-scroll">
+      <table id="results-table">
+        <thead>
+          <tr>
+            <th>Round</th><th>Users</th><th>Input</th><th>Success %</th>
+            <th>Output TPS</th><th>TPS/User</th><th>p50</th><th>p95</th><th>p99</th>
+          </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" id="charts-card" style="display:none;">
+    <h2>Charts</h2>
+    <div class="charts-grid" id="charts-grid"></div>
+  </div>
+</div>
+
+<script>
+const runId = "{{ run_id }}";
+let stopped = false;
+
+function stopRun() {
+  fetch(`/stop/${runId}`, {method: "POST"});
+  document.getElementById("stop-btn").innerText = "Stopping...";
+  document.getElementById("stop-btn").disabled = true;
+  stopped = true;
+}
+
+function fmt(n, d) {
+  if (n === null || n === undefined) return "N/A";
+  return Number(n).toFixed(d);
+}
+
+async function poll() {
+  try {
+    const res = await fetch(`/api/status/${runId}`);
+    const state = await res.json();
+
+    const badge = document.getElementById("badge");
+    if (state.error) {
+      badge.className = "status-badge status-error";
+      badge.innerText = "error";
+    } else if (state.done) {
+      badge.className = "status-badge status-done";
+      badge.innerText = "complete";
+    } else {
+      badge.className = "status-badge status-running";
+      badge.innerText = "running";
+    }
+
+    const pct = state.total_rounds ? (state.current_round / state.total_rounds) * 100 : 0;
+    document.getElementById("progress-bar").style.width = pct + "%";
+    document.getElementById("stat-round").innerText = `${state.current_round} / ${state.total_rounds}`;
+
+    if (state.started_at) {
+      const elapsed = Math.round(Date.now()/1000 - state.started_at);
+      const mins = Math.floor(elapsed/60);
+      const secs = elapsed % 60;
+      document.getElementById("stat-elapsed").innerText = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+    }
+
+    const summaries = state.summaries || [];
+    if (summaries.length > 0) {
+      const last = summaries[summaries.length - 1];
+      document.getElementById("stat-avg-tps").innerText = fmt(last.aggregate_tps, 1);
+      document.getElementById("stat-avg-tps-user").innerText = fmt(last.output_tps_per_user, 2);
+    }
+
+    const tbody = document.getElementById("results-body");
+    tbody.innerHTML = "";
+    for (const s of summaries) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${s.round}</td>
+        <td>${s.users}</td>
+        <td>${s.input_tokens_requested}</td>
+        <td>${fmt(s.success_rate*100,0)}%</td>
+        <td>${fmt(s.aggregate_tps,1)}</td>
+        <td>${fmt(s.output_tps_per_user,2)}</td>
+        <td>${fmt(s.p50,2)}</td>
+        <td>${fmt(s.p95,2)}</td>
+        <td>${fmt(s.p99,2)}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    const logDiv = document.getElementById("log");
+    logDiv.innerText = (state.log || []).join("\n");
+    logDiv.scrollTop = logDiv.scrollHeight;
+
+    if (state.done) {
+      document.getElementById("stop-btn").style.display = "none";
+      document.getElementById("json-link").style.display = "inline-block";
+      document.getElementById("pdf-link").style.display = "inline-block";
+
+      if (state.chart_files && state.chart_files.length > 0) {
+        const grid = document.getElementById("charts-grid");
+        if (grid.children.length === 0) {
+          document.getElementById("charts-card").style.display = "block";
+          for (const f of state.chart_files) {
+            const img = document.createElement("img");
+            img.src = `/charts/${runId}/${f}`;
+            grid.appendChild(img);
+          }
+        }
+      }
+      return;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+
+  setTimeout(poll, 2000);
+}
+
+poll();
+</script>
+</body>
+</html>
